@@ -1,9 +1,7 @@
 import os
-
 import telegram
 from dotenv import load_dotenv
 import logging
-from typing import Dict
 
 from telegram import __version__ as TG_VER
 
@@ -28,98 +26,57 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-
+from sheets_handler import GoogleTable
+from handler import CsvHandler
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-
-CHOOSE, REPLY, TYPE = range(3)
-
-
-contact_button = telegram.KeyboardButton(text="Номер телефона", request_contact=True)
-
-
-reply_keyboard = [
-    [contact_button, "Email"],
-    ["Закрыть"],
-]
-markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
-
-
-async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "Данные для проверки и отладки!\nНомер: " + context.user_data['phone'] + "\nEmail: " + context.user_data['email']
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
-
+load_dotenv()
+table = GoogleTable(os.getenv('TABLE_NAME'))
+csv_file = CsvHandler()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
+    keyboard = [
+        [
+            telegram.KeyboardButton("Подтвердить", request_contact=True)
+        ]
+    ]
+    reply = telegram.ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
     await update.message.reply_text(
-        "Привет! Дай данные", reply_markup=markup
-    )
-    return CHOOSE
+        "Добрый день! Отправим чек-лист ... в этот чат. Нажмите на кнопку \"подтвердить\" для получения материалов.", reply_markup=reply)
 
 
-async def get_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    contact = update.message.contact
-    print(contact)
-    context.user_data['phone'] = contact.phone_number
-    if not isOk(context):
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Спасибо!", reply_markup=markup)
-        return CHOOSE
-    else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Спасибо за данные!")
-        print(context.user_data)
-        await context.bot.send_document(chat_id=update.effective_chat.id, document='./file.pdf')
-        await debug(update, context)
-        return ConversationHandler.END
+async def send_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    table.append_contact(update.message.contact)
+    csv_file.append_contact(update.message.contact)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Спасибо... Узнайте больше о возможностях размещения рекламы на Novikov TV:\nhttps://novikovtv.tv", reply_markup=ReplyKeyboardRemove())
+    await context.bot.send_document(chat_id=update.effective_chat.id, document='./file.pdf')
+    await context.bot.send_contact(chat_id=update.effective_chat.id, phone_number='+79099092022', first_name='NovikovTV')
 
 
-async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Введите email")
-    return TYPE
+async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    email = context.args[0]
+    table.share(email)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Пользователю {} выдано разрешение на чтение".format(email))
 
 
-async def close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    return ConversationHandler.END
+async def send_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_document(chat_id=update.effective_chat.id, document="./contacts.csv")
 
 
-async def type_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    email = update.message.text
-    print(email)
-    context.user_data['email'] = email
-    if not isOk(context):
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Спасибо за мыло", reply_markup=markup)
-        return CHOOSE
-    else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Спасибо за данные")
-        print(context.user_data)
-        await context.bot.send_document(chat_id=update.effective_chat.id, document='./file.pdf')
-        await debug(update, context)
-        return ConversationHandler.END
-
-
-def isOk(context: ContextTypes.DEFAULT_TYPE) ->bool:
-    return 'phone' in context.user_data and 'email' in context.user_data
-
+async def send_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = table.get_url()
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=url)
 
 def main():
     load_dotenv()
+    table = GoogleTable(os.getenv('TABLE_NAME'))
     app = Application.builder().token(os.getenv("BOT_TOKEN")).build()
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            CHOOSE: [
-                MessageHandler(filters.Regex("^Email$"), get_email),
-                MessageHandler(filters.CONTACT, get_contact)
-            ],
-            TYPE: [
-                MessageHandler(filters.Entity(MessageEntity.EMAIL), type_email)
-            ]
-        },
-        fallbacks=[MessageHandler(filters.Regex("^Закрыть$"), close)]
-    )
-
-    app.add_handler(conv_handler)
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('share_to', share))
+    app.add_handler(CommandHandler('get_csv', send_csv))
+    app.add_handler(CommandHandler('get_url', send_url))
+    app.add_handler(MessageHandler(filters.CONTACT, send_document))
     app.run_polling()
 
 
