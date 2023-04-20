@@ -49,6 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     table.append_contact(update.message.contact)
     csv_file.append_contact(update.message.contact)
+    context.user_data['doc_send'] = True
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Спасибо... Узнайте больше о возможностях размещения рекламы на Novikov TV:\nhttps://novikovtv.tv", reply_markup=ReplyKeyboardRemove())
     await context.bot.send_document(chat_id=update.effective_chat.id, document='./file.pdf')
     await context.bot.send_contact(chat_id=update.effective_chat.id, phone_number='+79099092022', first_name='NovikovTV')
@@ -68,6 +69,15 @@ async def send_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = table.get_url()
     await context.bot.send_message(chat_id=update.effective_chat.id, text=url)
 
+
+async def reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(type(update.effective_user.id))
+    if str(update.effective_user.id) == os.getenv("ADMIN_ID"):
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Привет повелитель")
+    elif 'doc_send' not in context.user_data:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Нажмите на кнопку \"подтвердить\" для получения материалов.")
+
+
 def main():
     load_dotenv()
     table = GoogleTable(os.getenv('TABLE_NAME'))
@@ -76,6 +86,7 @@ def main():
     app.add_handler(CommandHandler('share_to', share))
     app.add_handler(CommandHandler('get_csv', send_csv))
     app.add_handler(CommandHandler('get_url', send_url))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reminder))
     app.add_handler(MessageHandler(filters.CONTACT, send_document))
     app.run_polling()
 
